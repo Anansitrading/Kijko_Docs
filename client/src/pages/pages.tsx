@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,18 +17,14 @@ import { Search } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { WikiPage } from "@shared/schema";
 
-const audienceVariant = (audience: string) => {
-  switch (audience) {
-    case "internal":
-      return "secondary" as const;
-    case "external":
-      return "default" as const;
-    case "both":
-      return "outline" as const;
-    default:
-      return "secondary" as const;
-  }
-};
+function readSearchFromHash() {
+  if (typeof window === "undefined") return "";
+  const hash = window.location.hash;
+  const queryIndex = hash.indexOf("?");
+  if (queryIndex === -1) return "";
+  const params = new URLSearchParams(hash.slice(queryIndex + 1));
+  return params.get("search") || "";
+}
 
 const audienceColor = (audience: string) => {
   switch (audience) {
@@ -45,37 +41,41 @@ const audienceColor = (audience: string) => {
 
 export default function Pages() {
   const [filter, setFilter] = useState<string>("all");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => readSearchFromHash());
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<{ pages: WikiPage[]; total: number } | WikiPage[]>({
     queryKey: ["/api/wiki/pages"],
   });
 
-  // Normalize data — the API might return { pages: [], total } or just an array
+  useEffect(() => {
+    const syncSearch = () => {
+      setSearch(readSearchFromHash());
+    };
+    window.addEventListener("hashchange", syncSearch);
+    return () => window.removeEventListener("hashchange", syncSearch);
+  }, []);
+
   const pages: WikiPage[] = Array.isArray(data) ? data : data?.pages ?? [];
   const totalCount = Array.isArray(data) ? data.length : data?.total ?? pages.length;
 
   const filtered = pages
-    .filter((p) => {
-      if (filter !== "all" && p.audience !== filter && p.audience !== "both") return false;
+    .filter((page) => {
+      if (filter !== "all" && page.audience !== filter && page.audience !== "both") return false;
       if (search) {
-        const q = search.toLowerCase();
+        const query = search.toLowerCase();
         return (
-          p.title.toLowerCase().includes(q) ||
-          p.slug.toLowerCase().includes(q) ||
-          p.author.toLowerCase().includes(q)
+          page.title.toLowerCase().includes(query) ||
+          page.slug.toLowerCase().includes(query) ||
+          page.author.toLowerCase().includes(query)
         );
       }
       return true;
     })
-    .sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
 
   return (
     <div className="p-6 space-y-4">
-      {/* Controls */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <Tabs value={filter} onValueChange={setFilter}>
           <TabsList data-testid="tabs-audience-filter">
@@ -108,7 +108,6 @@ export default function Pages() {
         </div>
       </div>
 
-      {/* Table */}
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -139,37 +138,22 @@ export default function Pages() {
                     <TableRow
                       key={page.id}
                       className="cursor-pointer hover:bg-muted/50"
-                      onClick={() =>
-                        setExpandedSlug(
-                          expandedSlug === page.slug ? null : page.slug
-                        )
-                      }
+                      onClick={() => setExpandedSlug(expandedSlug === page.slug ? null : page.slug)}
                       data-testid={`row-page-${page.id}`}
                     >
-                      <TableCell className="text-sm font-medium">
-                        {page.title}
-                      </TableCell>
-                      <TableCell className="text-xs font-mono text-muted-foreground">
-                        {page.slug}
-                      </TableCell>
+                      <TableCell className="text-sm font-medium">{page.title}</TableCell>
+                      <TableCell className="text-xs font-mono text-muted-foreground">{page.slug}</TableCell>
                       <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] ${audienceColor(page.audience)}`}
-                        >
+                        <Badge variant="outline" className={`text-[10px] ${audienceColor(page.audience)}`}>
                           {page.audience}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {page.author}
-                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{page.author}</TableCell>
                       <TableCell className="text-xs font-mono text-right tabular-nums">
                         {page.wordCount.toLocaleString()}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground text-right tabular-nums">
-                        {formatDistanceToNow(new Date(page.updatedAt), {
-                          addSuffix: true,
-                        })}
+                        {formatDistanceToNow(new Date(page.updatedAt), { addSuffix: true })}
                       </TableCell>
                     </TableRow>
                     {expandedSlug === page.slug && (

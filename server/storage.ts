@@ -1,42 +1,41 @@
-import { 
-  wikiPages, repos, chatMessages, buildEvents, notebookSources,
-  type WikiPage, type InsertWikiPage,
-  type Repo, type InsertRepo,
-  type ChatMessage, type InsertChatMessage,
-  type BuildEvent, type InsertBuildEvent,
-  type NotebookSource, type InsertNotebookSource,
+import {
+  wikiPages,
+  repos,
+  chatMessages,
+  buildEvents,
+  notebookSources,
+  type WikiPage,
+  type InsertWikiPage,
+  type Repo,
+  type InsertRepo,
+  type ChatMessage,
+  type InsertChatMessage,
+  type BuildEvent,
+  type InsertBuildEvent,
+  type NotebookSource,
+  type InsertNotebookSource,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, like, or, sql } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
+import { getRuntimeState } from "./runtime-state";
 
 export interface IStorage {
-  // Wiki Pages
   getPages(audience?: string, search?: string, limit?: number, offset?: number): { pages: WikiPage[]; total: number };
   getPage(slug: string): WikiPage | undefined;
   createPage(data: InsertWikiPage): WikiPage;
   updatePage(slug: string, data: Partial<InsertWikiPage>): WikiPage | undefined;
   deletePage(slug: string): boolean;
-
-  // Repos
   getRepos(): Repo[];
   getRepo(id: number): Repo | undefined;
   createRepo(data: InsertRepo): Repo;
   deleteRepo(id: number): boolean;
-
-  // Chat Messages
   getMessages(sessionId: string): ChatMessage[];
   createMessage(data: InsertChatMessage): ChatMessage;
-
-  // Build Events
   getBuilds(): BuildEvent[];
   createBuild(data: InsertBuildEvent): BuildEvent;
   updateBuild(buildId: string, data: Partial<InsertBuildEvent>): BuildEvent | undefined;
-
-  // Notebook Sources
   getSources(type?: string, search?: string): NotebookSource[];
   createSource(data: InsertNotebookSource): NotebookSource;
-
-  // System Status
   getStatus(): SystemStatus;
 }
 
@@ -49,6 +48,9 @@ export interface SystemStatus {
   totalPages: number;
   lastBuild: string | null;
   nextPoll: string | null;
+  agentState: "idle" | "processing" | "building" | "deploying" | "error";
+  pendingConfirmations: number;
+  notebookReachable: boolean;
 }
 
 const startTime = Date.now();
@@ -57,14 +59,15 @@ export class DatabaseStorage implements IStorage {
   getPages(audience?: string, search?: string, limit = 50, offset = 0) {
     let allPages = db.select().from(wikiPages).all();
     if (audience) {
-      allPages = allPages.filter(p => p.audience === audience || p.audience === "both");
+      allPages = allPages.filter((page) => page.audience === audience || page.audience === "both");
     }
     if (search) {
-      const q = search.toLowerCase();
-      allPages = allPages.filter(p => 
-        p.title.toLowerCase().includes(q) || p.content.toLowerCase().includes(q)
+      const query = search.toLowerCase();
+      allPages = allPages.filter(
+        (page) => page.title.toLowerCase().includes(query) || page.content.toLowerCase().includes(query) || page.slug.toLowerCase().includes(query),
       );
     }
+    allPages = allPages.sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
     const total = allPages.length;
     const pages = allPages.slice(offset, offset + limit);
     return { pages, total };
@@ -81,10 +84,12 @@ export class DatabaseStorage implements IStorage {
   updatePage(slug: string, data: Partial<InsertWikiPage>) {
     const existing = this.getPage(slug);
     if (!existing) return undefined;
-    return db.update(wikiPages)
+    return db
+      .update(wikiPages)
       .set({ ...data, updatedAt: new Date().toISOString() })
       .where(eq(wikiPages.slug, slug))
-      .returning().get();
+      .returning()
+      .get();
   }
 
   deletePage(slug: string) {
@@ -110,7 +115,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   getMessages(sessionId: string) {
-    return db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId)).all();
+    return db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.sessionId, sessionId))
+      .all()
+      .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
   }
 
   createMessage(data: InsertChatMessage) {
@@ -126,20 +136,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   updateBuild(buildId: string, data: Partial<InsertBuildEvent>) {
-    return db.update(buildEvents)
-      .set(data)
-      .where(eq(buildEvents.buildId, buildId))
-      .returning().get();
+    return db.update(buildEvents).set(data).where(eq(buildEvents.buildId, buildId)).returning().get();
   }
 
   getSources(type?: string, search?: string) {
-    let all = db.select().from(notebookSources).all();
-    if (type) all = all.filter(s => s.type === type);
-    if (search) {
-      const q = search.toLowerCase();
-      all = all.filter(s => s.title.toLowerCase().includes(q) || (s.summary?.toLowerCase().includes(q)));
+    let allSources = db.select().from(notebookSources).all();
+    if (type) {
+      allSources = allSources.filter((source) => source.type === type);
     }
-    return all;
+    if (search) {
+      const query = search.toLowerCase();
+      allSources = allSources.filter(
+        (source) => source.title.toLowerCase().includes(query) || (source.summary ?? "").toLowerCase().includes(query),
+      );
+    }
+    return allSources;
   }
 
   createSource(data: InsertNotebookSource) {
@@ -147,28 +158,31 @@ export class DatabaseStorage implements IStorage {
   }
 
   getStatus(): SystemStatus {
+    const runtime = getRuntimeState();
     const repoCount = db.select({ count: sql<number>`count(*)` }).from(repos).get();
     const pageCount = db.select({ count: sql<number>`count(*)` }).from(wikiPages).get();
+    const sourceCount = db.select({ count: sql<number>`count(*)` }).from(notebookSources).get();
     const lastBuild = db.select().from(buildEvents).orderBy(desc(buildEvents.createdAt)).get();
 
     return {
       status: "healthy",
-      version: "0.1.0",
+      version: "1.0.0-recovered",
       uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
       components: {
-        fastapi: "running",
-        mkdocs_internal: "built",
-        mkdocs_external: "built",
-        d2_renderer: "available",
-        github_poller: "active",
-        scheduler: "running",
-        database: "connected",
-        llm: "connected",
+        api: "running",
+        websocket: "running",
+        architecture_viewer: "running",
+        notebook: sourceCount?.count ? "connected" : "seeded",
+        scheduler: "planned",
+        webhook: process.env.GITHUB_WEBHOOK_SECRET ? "armed" : "disabled",
       },
       monitoredRepos: repoCount?.count ?? 0,
       totalPages: pageCount?.count ?? 0,
       lastBuild: lastBuild?.createdAt ?? null,
-      nextPoll: new Date(Date.now() + 600000).toISOString(),
+      nextPoll: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      agentState: runtime.agentState,
+      pendingConfirmations: runtime.pendingConfirmations,
+      notebookReachable: runtime.notebookReachable,
     };
   }
 }

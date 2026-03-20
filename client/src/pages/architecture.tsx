@@ -81,6 +81,16 @@ function layoutNodes(nodes: DiagramNode[]) {
   return positions;
 }
 
+function resolveNodeHash(node: DiagramNode) {
+  if (node.url.startsWith("/wiki/")) {
+    return `#/pages?search=${encodeURIComponent(node.label)}`;
+  }
+  if (node.url === "/") {
+    return "#/";
+  }
+  return `#${node.url}`;
+}
+
 function ArchitectureSVG({
   data,
   zoom,
@@ -94,7 +104,6 @@ function ArchitectureSVG({
 }) {
   const positions = layoutNodes(data.nodes);
 
-  // Compute viewBox to fit all nodes
   const xs = Object.values(positions).map((p) => p.x);
   const ys = Object.values(positions).map((p) => p.y);
   const minX = Math.min(...xs) - NODE_WIDTH;
@@ -116,7 +125,6 @@ function ArchitectureSVG({
         transformOrigin: "center center",
       }}
     >
-      {/* Edges */}
       {data.edges.map((edge, i) => {
         const fromPos = positions[edge.from];
         const toPos = positions[edge.to];
@@ -126,7 +134,6 @@ function ArchitectureSVG({
         const y1 = fromPos.y + NODE_HEIGHT;
         const x2 = toPos.x + NODE_WIDTH / 2;
         const y2 = toPos.y;
-
         const midY = (y1 + y2) / 2;
 
         return (
@@ -154,7 +161,6 @@ function ArchitectureSVG({
         );
       })}
 
-      {/* Nodes */}
       {data.nodes.map((node) => {
         const pos = positions[node.id];
         if (!pos) return null;
@@ -167,7 +173,7 @@ function ArchitectureSVG({
             className="cursor-pointer"
             data-testid={`node-${node.id}`}
             onClick={() => {
-              if (node.url) window.location.hash = `#/pages`;
+              window.location.hash = resolveNodeHash(node);
             }}
           >
             <rect
@@ -192,9 +198,7 @@ function ArchitectureSVG({
               fill={colors.text}
               fontFamily="General Sans, sans-serif"
             >
-              {node.label.length > 18
-                ? node.label.slice(0, 16) + "…"
-                : node.label}
+              {node.label.length > 18 ? node.label.slice(0, 16) + "…" : node.label}
             </text>
           </g>
         );
@@ -218,11 +222,14 @@ export default function Architecture() {
     await apiRequest("POST", "/api/architecture/refresh");
   };
 
-  const handlePanStart = useCallback((e: React.MouseEvent) => {
-    isPanning.current = true;
-    panStart.current = { x: e.clientX, y: e.clientY };
-    panOffset.current = { ...pan };
-  }, [pan]);
+  const handlePanStart = useCallback(
+    (e: React.MouseEvent) => {
+      isPanning.current = true;
+      panStart.current = { x: e.clientX, y: e.clientY };
+      panOffset.current = { ...pan };
+    },
+    [pan],
+  );
 
   useEffect(() => {
     const handleMove = (e: MouseEvent) => {
@@ -247,7 +254,6 @@ export default function Architecture() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-border shrink-0">
         <div>
           <h2 className="text-sm font-semibold" data-testid="text-architecture-title">
@@ -259,79 +265,34 @@ export default function Architecture() {
             </p>
           )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          data-testid="button-refresh-architecture"
-          className="gap-1.5"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Refresh
-        </Button>
-      </div>
-
-      {/* Diagram area */}
-      <div className="flex-1 relative overflow-hidden bg-background">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <Skeleton className="h-64 w-96" />
-          </div>
-        ) : data ? (
-          <ArchitectureSVG data={data} zoom={zoom} pan={pan} onPanStart={handlePanStart} />
-        ) : null}
-
-        {/* Zoom controls */}
-        <div className="absolute bottom-4 right-4 flex flex-col gap-1">
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => setZoom((z) => Math.min(z + 0.2, 3))}
-            data-testid="button-zoom-in"
-          >
-            <Plus className="h-3.5 w-3.5" />
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleRefresh} data-testid="button-refresh-architecture">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
           </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => setZoom((z) => Math.max(z - 0.2, 0.3))}
-            data-testid="button-zoom-out"
-          >
-            <Minus className="h-3.5 w-3.5" />
+          <Button variant="outline" size="icon" onClick={() => setZoom((prev) => Math.max(0.6, prev - 0.1))}>
+            <Minus className="h-4 w-4" />
           </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => {
-              setZoom(1);
-              setPan({ x: 0, y: 0 });
-            }}
-            data-testid="button-zoom-reset"
-          >
-            <Maximize className="h-3.5 w-3.5" />
+          <Button variant="outline" size="icon" onClick={() => setZoom(1)}>
+            <Maximize className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="icon" onClick={() => setZoom((prev) => Math.min(1.8, prev + 0.1))}>
+            <Plus className="h-4 w-4" />
           </Button>
         </div>
+      </div>
 
-        {/* Legend */}
-        <Card className="absolute bottom-4 left-4 w-auto">
-          <CardContent className="py-2.5 px-3">
-            <div className="flex flex-wrap gap-3">
-              {Object.entries(NODE_COLORS).map(([type, colors]) => (
-                <div key={type} className="flex items-center gap-1.5">
-                  <div
-                    className="h-2.5 w-2.5 rounded-sm"
-                    style={{
-                      backgroundColor: colors.bg === "transparent" ? "transparent" : colors.bg,
-                      border: `1.5px ${type === "group" ? "dashed" : "solid"} ${colors.border}`,
-                    }}
-                  />
-                  <span className="text-[10px] text-muted-foreground capitalize">{type}</span>
-                </div>
-              ))}
-            </div>
+      <div className="p-6 flex-1 min-h-0">
+        <Card className="h-full">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">Interactive Overview</CardTitle>
+          </CardHeader>
+          <CardContent className="h-[calc(100%-56px)]">
+            {isLoading || !data ? (
+              <Skeleton className="h-full w-full" />
+            ) : (
+              <ArchitectureSVG data={data} zoom={zoom} pan={pan} onPanStart={handlePanStart} />
+            )}
           </CardContent>
         </Card>
       </div>
