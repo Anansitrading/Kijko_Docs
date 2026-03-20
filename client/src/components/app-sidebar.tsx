@@ -34,36 +34,13 @@ const navItems = [
 
 function KijkoLogo({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-label="Kijko Logo"
-    >
-      {/* Hexagonal node-graph mark */}
-      <path
-        d="M16 2L28.124 9V23L16 30L3.876 23V9L16 2Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        fill="none"
-      />
-      {/* Inner K letterform */}
-      <path
-        d="M12 10V22M12 16L20 10M12 16L20 22"
-        stroke="hsl(183 60% 45%)"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* Node dots */}
-      <circle cx="16" cy="2" r="1.5" fill="currentColor" />
-      <circle cx="28.124" cy="9" r="1.5" fill="currentColor" />
-      <circle cx="28.124" cy="23" r="1.5" fill="currentColor" />
-      <circle cx="16" cy="30" r="1.5" fill="currentColor" />
-      <circle cx="3.876" cy="23" r="1.5" fill="currentColor" />
-      <circle cx="3.876" cy="9" r="1.5" fill="currentColor" />
-    </svg>
+    <img
+      src="/kijko-logo.png"
+      alt="Kijko Logo"
+      width={28}
+      height={28}
+      className={`${className || ''} object-contain rounded-sm`}
+    />
   );
 }
 
@@ -82,7 +59,7 @@ export function AppSidebar() {
       <SidebarHeader className="p-4">
         <Link href="/" data-testid="link-logo">
           <div className="flex items-center gap-2.5">
-            <KijkoLogo className="h-7 w-7 text-foreground" />
+            <KijkoLogo className="h-7 w-7 shrink-0" />
             <div className="flex flex-col">
               <span className="text-sm font-semibold tracking-tight">Kijko</span>
               <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
